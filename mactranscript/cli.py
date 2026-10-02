@@ -7,12 +7,21 @@ import json
 import shutil
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 from . import __version__, asr, diarize
 from .align import assign_speakers, build_blocks, name_speakers
 from .audio import SAMPLE_RATE, AudioError, decode, duration_of
 from .render import render, timestamp
+
+
+def _pad(text: str, width: int) -> str:
+    """按终端显示宽度补齐空格 —— 中日韩字符占两列，直接用 f-string 的
+    `{:<18}` 会按字符数对齐，导致中英文混排的列参差不齐。
+    """
+    shown = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    return text + " " * max(0, width - shown)
 
 
 def log(message: str, *, quiet: bool = False) -> None:
@@ -92,7 +101,7 @@ def cmd_setup() -> int:
     problems: list[str] = []
 
     def row(label: str, ok: bool, detail: str) -> None:
-        print(f"  {'ok ' if ok else 'XX '} {label:<18} {detail}")
+        print(f"  {'ok ' if ok else 'XX '} {_pad(label, 18)} {detail}")
 
     # ffmpeg
     ffmpeg = shutil.which("ffmpeg")
