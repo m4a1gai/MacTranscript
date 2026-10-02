@@ -1,0 +1,11 @@
+# 语音转文字：Whisper 经 MLX 原生运行在 Apple Silicon GPU 上。
+mlx-whisper>=0.4.3
+
+# 说话人分离（判断「谁在何时说话」）。
+pyannote.audio>=4.0.0
+
+# 由上面两个包间接引入，在此显式固定下限，使版本约束一目了然。
+torch>=2.8.0
+torchaudio>=2.8.0
+huggingface_hub>=0.28.1
+numpy>=2.0
