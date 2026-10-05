@@ -78,7 +78,27 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 
 令牌**仅**用于首次下载模型。权重缓存完成后，断网也能正常转写。
 
-## 使用：网页界面（推荐）
+## 使用：双击 App（推荐）
+
+`./install.sh` 会生成 **MacTranscript.app**，双击即可 —— 它会在后台拉起本地
+服务并自动打开浏览器，全程不需要终端。
+
+把它拖进「应用程序」文件夹，就能从启动台或 Dock 打开。
+
+- 重复双击不会启动第二个服务，只会把已有页面重新打开
+- 用完点页面底部的**停止服务**即可退出；关掉浏览器不会停止服务
+- 启动日志在 `~/Library/Logs/MacTranscript.log`
+
+项目目录移动过之后，重新生成一次：
+
+```bash
+./make_app.sh
+```
+
+> App 没有经过 Apple 签名。因为是你本机构建的，不会被 Gatekeeper 拦截；
+> 但如果你把它拷到别的机器，首次打开需要在「系统设置 › 隐私与安全性」里放行。
+
+## 使用：网页界面
 
 ```bash
 ./ui.sh
@@ -232,8 +252,8 @@ pyannote 的语音活动检测来裁决：距离任何已检测语音超过 2 �
 
 ## 代码结构
 
-两个入口（`transcribe.sh` 命令行、`ui.sh` 网页界面）共用 `pipeline.py` 里的
-同一条流程，因此两者的处理顺序、参数含义和输出完全一致。
+三个入口（MacTranscript.app、`ui.sh` 网页界面、`transcribe.sh` 命令行）
+共用 `pipeline.py` 里的同一条流程，因此两者的处理顺序、参数含义和输出完全一致。
 
 ```
 mactranscript/
@@ -247,6 +267,8 @@ mactranscript/
   web.py        本地网页服务（仅用标准库）
   static/
     index.html  界面本体
+tools/
+  make_icon.py  生成 app 图标
 tests/
   test_align.py 对齐与渲染测试（无需加载模型）
 ```

@@ -31,6 +31,9 @@ STATIC = Path(__file__).parent / "static"
 # 单次上传的上限，防止手滑把几十 GB 的文件塞进内存里的队列。
 MAX_UPLOAD_BYTES = 2 * 1024**3  # 2 GiB
 
+# 从 .app 启动时没有终端可以按 Control-C，所以界面上要有一个停止入口。
+_server: ThreadingHTTPServer | None = None
+
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 _uploads = Path(tempfile.mkdtemp(prefix="mactranscript-"))
@@ -200,6 +203,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path)
+        if route.path == "/api/quit":
+            self._json(HTTPStatus.OK, {"stopping": True})
+            # 必须另起线程：shutdown() 会等 serve_forever 退出，
+            # 在当前请求线程里调用会死锁。
+            if _server is not None:
+                threading.Thread(target=_server.shutdown, daemon=True).start()
+            return
         if route.path != "/api/jobs":
             self._error(HTTPStatus.NOT_FOUND, "没有这个地址")
             return
@@ -334,6 +344,9 @@ def serve(argv: list[str] | None = None) -> int:
         print(f"错误：无法监听 127.0.0.1:{args.port} —— {exc}")
         print("端口可能已被占用，换一个：./ui.sh --port 8780")
         return 1
+
+    global _server
+    _server = httpd
 
     url = f"http://127.0.0.1:{args.port}/"
     print(f"MacTranscript {__version__} 网页界面已启动")

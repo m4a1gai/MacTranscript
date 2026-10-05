@@ -130,6 +130,11 @@
   .s2 .who { color: var(--sp3); } .s3 .who { color: var(--sp4); }
   .errbox { color: var(--err); white-space: pre-wrap; font-size: 13.5px; line-height: 1.7; }
   .hidden { display: none !important; }
+  footer { margin-top: 28px; text-align: center; font-size: 12.5px; color: var(--muted); }
+  footer button { background: none; color: var(--muted); border: 1px solid var(--line);
+                  padding: 6px 14px; font-size: 12.5px; border-radius: 7px; }
+  footer button:hover { color: var(--err); border-color: var(--err); }
+  #stopped { text-align: center; padding: 48px 20px; color: var(--muted); }
   .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
            background: var(--text); color: var(--panel); padding: 10px 18px;
            border-radius: 20px; font-size: 13.5px; opacity: 0;
@@ -238,6 +243,10 @@
     </div>
     <div id="turns"></div>
   </section>
+  <footer>
+    <p id="foot">录音与转写稿都只在这台 Mac 上 · 关掉浏览器不会停止服务</p>
+    <button id="quit">停止服务</button>
+  </footer>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -428,6 +437,13 @@ function show(j) {
     catch { toast("复制失败，请用下载按钮"); }
   };
 }
+$("quit").addEventListener("click", async () => {
+  try { await fetch("/api/quit", { method: "POST" }); } catch (e) { /* 服务已经走了 */ }
+  document.querySelector(".wrap").innerHTML =
+    '<div id="stopped"><h2>服务已停止</h2>' +
+    '<p>可以关闭这个标签页了。<br>需要再次使用时，双击 MacTranscript 图标。</p></div>';
+});
+
 function toast(msg) {
   const t = $("toast");
   t.textContent = msg; t.classList.add("show");

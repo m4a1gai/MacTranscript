@@ -27,6 +27,9 @@ echo "==> 安装 Python 依赖（会拉取约 2 GB 的 PyTorch 与 MLX）"
 ./.venv/bin/python -m pip install --upgrade pip --quiet
 ./.venv/bin/python -m pip install -r requirements.txt
 
+echo "==> 生成 MacTranscript.app"
+./make_app.sh >/dev/null && echo "    已生成，可双击打开"
+
 echo
 ./.venv/bin/python -m mactranscript setup || true
 
@@ -40,10 +43,7 @@ cat <<'TIP'
   在 https://huggingface.co/settings/tokens 创建 Read 令牌并保存：
     ./.venv/bin/hf auth login
 
-  然后打开网页界面（推荐）：
-    ./ui.sh
-
-  或者用命令行：
-    ./transcribe.sh recording.m4a
+  然后双击 MacTranscript.app 即可使用
+  （也可以用 ./ui.sh 开界面，或 ./transcribe.sh recording.m4a 走命令行）
 
 TIP

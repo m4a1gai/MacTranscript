@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 
+# 由 make_app.sh 生成的构建产物（含写死的本机路径，不适合入库）
+MacTranscript.app/
+
 # 录音与生成的转写稿不进入 git。
 *.m4a
 *.mp3
