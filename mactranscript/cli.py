@@ -10,10 +10,8 @@ import time
 import unicodedata
 from pathlib import Path
 
-from . import __version__, asr, diarize
-from .align import assign_speakers, build_blocks, name_speakers
-from .audio import SAMPLE_RATE, AudioError, decode, duration_of
-from .render import render, timestamp
+from . import __version__, asr, diarize, pipeline
+from .audio import AudioError
 
 
 def _pad(text: str, width: int) -> str:
@@ -34,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mactranscript",
         description="在本机离线转写音频文件，输出带说话人标注和时间戳的 Markdown。",
-        epilog="运行 'mactranscript setup' 可检查安装环境。",
+        epilog="运行 'mactranscript ui' 打开网页界面，'mactranscript setup' 检查安装环境。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("audio", type=Path, help="输入文件（.m4a、.mp3、.wav 等）")
@@ -167,97 +165,71 @@ def cmd_setup() -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    # 单独识别这个动词，使 `transcribe.sh setup` 无需引入子命令的复杂度。
+    # 单独识别这些动词，使 `transcribe.sh setup` / `ui` 无需引入子命令的复杂度。
     if argv and argv[0] in ("setup", "check", "doctor"):
         return cmd_setup()
+    if argv and argv[0] in ("ui", "web", "gui"):
+        from .web import serve
+
+        return serve(argv[1:])
 
     args = build_parser().parse_args(argv)
     quiet = args.quiet
     num_speakers = parse_num_speakers(args.num_speakers)
     names = [n.strip() for n in args.speakers.split(",") if n.strip()] if args.speakers else None
     to_stdout = str(args.output) == "-"
-    started = time.time()
 
-    # 1. 只解码一次，然后把同一份采样交给两个模型。
-    log(f"[1/4] 正在解码 {args.audio.name} ……", quiet=quiet)
+    # 把流程的进度回调翻译成终端上的分步输出。
+    labels = {"decode": "1/4", "diarize": "2/4", "transcribe": "3/4", "align": "4/4"}
+    seen: set[str] = set()
+
+    def on_progress(stage: str, detail: str, _percent: float) -> None:
+        if stage not in seen:
+            seen.add(stage)
+            log(f"[{labels[stage]}] {detail} ……", quiet=quiet)
+        elif stage in ("decode", "diarize", "transcribe", "align"):
+            log(f"      {detail}", quiet=quiet)
+
     try:
-        audio = decode(args.audio)
+        result = pipeline.run(
+            args.audio,
+            num_speakers=num_speakers,
+            speaker_names=names,
+            language=None if args.language == "auto" else args.language,
+            model=args.model,
+            diarization_model=args.diarization_model,
+            device=args.device,
+            prompt=args.prompt,
+            keep_unmatched=args.keep_unmatched,
+            on_progress=on_progress,
+            verbose=not quiet,
+        )
     except AudioError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
-    seconds = duration_of(audio)
-    log(f"      共 {timestamp(seconds)} 音频，{SAMPLE_RATE} Hz 单声道", quiet=quiet)
-
-    # 2. 先做「谁在何时说话」。把它放在前面，是因为环境配置问题会在这一步
-    #    暴露；在耗时数分钟的转写之前失败，对使用者更友好。
-    log(f"[2/4] 正在识别说话人（{args.diarization_model}）……", quiet=quiet)
-    try:
-        turns = diarize.diarize(
-            audio,
-            SAMPLE_RATE,
-            num_speakers=num_speakers,
-            model=args.diarization_model,
-            device=args.device,
-            verbose=not quiet,
-        )
     except diarize.DiarizationError as exc:
         print(f"\n错误：{exc}", file=sys.stderr)
         return 1
-    found = sorted({t.speaker for t in turns})
-    log(f"      得到 {len(turns)} 个轮次，共 {len(found)} 位说话人", quiet=quiet)
-    if not turns:
-        log(
-            "      ! 未检测到语音；如仍要强制转写，请加 --keep-unmatched",
-            quiet=quiet,
-        )
-
-    # 3. 说了什么。
-    log(f"[3/4] 正在转写（{args.model}）……", quiet=quiet)
-    try:
-        words, raw = asr.transcribe(
-            audio,
-            model=args.model,
-            language=None if args.language == "auto" else args.language,
-            initial_prompt=args.prompt,
-            verbose=not quiet,
-        )
     except Exception as exc:  # noqa: BLE001 - 如实呈现模型或下载错误
         print(f"错误：转写失败：{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    log(f"      共 {len(words)} 个词", quiet=quiet)
 
-    # 4. 合并两条时间线并写出结果。
-    log("[4/4] 正在对齐并生成 Markdown ……", quiet=quiet)
-    labelled = assign_speakers(words, turns, drop_unmatched=not args.keep_unmatched)
-    dropped = sum(1 for w in labelled if w.speaker is None)
-    if dropped:
+    if result.dropped_words:
         log(
-            f"      已丢弃 {dropped} 个无对应语音的词"
+            f"      已丢弃 {result.dropped_words} 个无对应语音的词"
             f"（如需保留请加 --keep-unmatched）",
             quiet=quiet,
         )
-    blocks = build_blocks(labelled)
-    speaker_names = name_speakers(blocks, names)
-    elapsed = time.time() - started
-
-    markdown = render(
-        blocks,
-        speaker_names,
-        source=args.audio,
-        audio_seconds=seconds,
-        asr_model=args.model,
-        diarization_model=args.diarization_model,
-        elapsed=elapsed,
-    )
 
     if to_stdout:
-        sys.stdout.write(markdown)
+        sys.stdout.write(result.markdown)
     else:
         out = args.output or args.audio.with_suffix(".md")
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(markdown, encoding="utf-8")
+        out.write_text(result.markdown, encoding="utf-8")
         log(
-            f"\n已写入 {out}（{len(blocks)} 个段落，{len(speaker_names)} 位说话人）",
+            f"\n已写入 {out}（{len(result.blocks)} 个段落，"
+            f"{len(result.speaker_names)} 位说话人）",
             quiet=quiet,
         )
 
@@ -266,11 +238,11 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "source": str(args.audio),
-                    "duration_seconds": seconds,
-                    "language": raw.get("language"),
-                    "speaker_names": speaker_names,
-                    "turns": [vars(t) for t in turns],
-                    "blocks": [vars(b) for b in blocks],
+                    "duration_seconds": result.audio_seconds,
+                    "language": result.language,
+                    "speaker_names": result.speaker_names,
+                    "turns": [vars(t) for t in result.turns],
+                    "blocks": [vars(b) for b in result.blocks],
                 },
                 indent=2,
                 ensure_ascii=False,

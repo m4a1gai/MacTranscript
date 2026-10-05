@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacTranscript</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --panel: #ffffff;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --line: #d2d2d7;
+    --accent: #0071e3;
+    --accent-soft: #e8f1fd;
+    --ok: #1d8a4e;
+    --warn: #b25000;
+    --err: #c9252d;
+    --sp1: #0071e3;
+    --sp2: #a8358f;
+    --sp3: #1d8a4e;
+    --sp4: #b25000;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --panel: #2c2c2e; --text: #f5f5f7; --muted: #98989d;
+      --line: #3a3a3c; --accent: #0a84ff; --accent-soft: #0a84ff22;
+      --ok: #30d158; --warn: #ff9f0a; --err: #ff453a;
+      --sp1: #0a84ff; --sp2: #da8fff; --sp3: #30d158; --sp4: #ff9f0a;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC",
+          "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -.3px; margin: 0; }
+  .ver { color: var(--muted); font-size: 13px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  /* 环境自检 */
+  #env.bad { border-color: var(--warn); }
+  .envrow { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13.5px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.no { background: var(--err); }
+  .problem {
+    margin-top: 14px; padding: 14px 16px; border-radius: 10px;
+    background: var(--accent-soft); border: 1px solid var(--line);
+    white-space: pre-wrap; font-size: 13px; line-height: 1.7;
+  }
+  .problem a { color: var(--accent); }
+
+  /* 拖放区 */
+  #drop {
+    border: 2px dashed var(--line); border-radius: var(--radius);
+    padding: 44px 20px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s;
+    background: var(--panel);
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  #drop.over { border-style: solid; }
+  #drop h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+  #drop p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .pick { color: var(--accent); text-decoration: underline; }
+
+  /* 选项 */
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+  input, select {
+    width: 100%; padding: 8px 10px; font: inherit; font-size: 14px;
+    color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 13.5px; }
+  details .opts { margin-top: 14px; }
+  .row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .row input[type=checkbox] { width: auto; }
+  .row label { margin: 0; font-size: 13.5px; color: var(--text); }
+
+  button {
+    font: inherit; font-size: 15px; font-weight: 500; padding: 10px 22px;
+    border-radius: 9px; border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); border-color: var(--line); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+  .filename { font-size: 13.5px; color: var(--muted); margin-right: auto; }
+
+  /* 进度 */
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+             border-radius: 3px; transition: width .4s ease; }
+  .steps { display: flex; gap: 6px; margin: 16px 0 10px; font-size: 12.5px; }
+  .step { flex: 1; text-align: center; color: var(--muted); padding-bottom: 6px;
+          border-bottom: 2px solid var(--line); }
+  .step.active { color: var(--accent); border-color: var(--accent); font-weight: 500; }
+  .step.done { color: var(--ok); border-color: var(--ok); }
+  .pdetail { display: flex; justify-content: space-between; gap: 12px;
+             font-size: 13px; color: var(--muted); margin-top: 10px; }
+
+  /* 结果 */
+  .stats { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px;
+           color: var(--muted); margin-bottom: 18px; }
+  .stats b { color: var(--text); font-weight: 600; }
+  .turn { padding: 14px 0; border-top: 1px solid var(--line); }
+  .turn:first-of-type { border-top: 0; }
+  .tmeta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .who { font-weight: 600; font-size: 14.5px; }
+  .when { font-size: 12px; color: var(--muted);
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .said { margin: 0; }
+  .s0 .who { color: var(--sp1); } .s1 .who { color: var(--sp2); }
+  .s2 .who { color: var(--sp3); } .s3 .who { color: var(--sp4); }
+  .errbox { color: var(--err); white-space: pre-wrap; font-size: 13.5px; line-height: 1.7; }
+  .hidden { display: none !important; }
+  .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+           background: var(--text); color: var(--panel); padding: 10px 18px;
+           border-radius: 20px; font-size: 13.5px; opacity: 0;
+           transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MacTranscript</h1>
+    <span class="ver" id="ver"></span>
+  </header>
+  <p class="sub">把对话录音转成带说话人和时间戳的转写稿。全程在本机运行，录音不会上传到任何地方。</p>
+
+  <section class="panel" id="env"><div class="envrow" id="envrow">正在检查运行环境……</div></section>
+
+  <section class="panel">
+    <div id="drop">
+      <h2>把音频拖到这里</h2>
+      <p>或<span class="pick">点击选择文件</span> —— 支持 m4a、mp3、wav、aac、mov 等</p>
+      <input type="file" id="file" class="hidden" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mov,.mp4,.caf,.flac">
+    </div>
+
+    <div id="form" class="hidden">
+      <div class="opts" style="margin-top:20px">
+        <div>
+          <label for="num">说话人数量</label>
+          <select id="num">
+            <option value="2" selected>2 人（对话）</option>
+            <option value="1">1 人（独白）</option>
+            <option value="3">3 人</option>
+            <option value="4">4 人</option>
+            <option value="5">5 人</option>
+            <option value="6">6 人</option>
+            <option value="auto">自动判断</option>
+          </select>
+        </div>
+        <div>
+          <label for="names">说话人名字（按谁先开口，逗号分隔）</label>
+          <input id="names" placeholder="张三,李四" autocomplete="off">
+        </div>
+        <div>
+          <label for="lang">语言</label>
+          <select id="lang">
+            <option value="en" selected>英语</option>
+            <option value="zh">中文</option>
+            <option value="ja">日语</option>
+            <option value="ko">韩语</option>
+            <option value="auto">自动检测</option>
+          </select>
+        </div>
+      </div>
+
+      <details>
+        <summary>更多选项</summary>
+        <div class="opts">
+          <div>
+            <label for="prompt">词汇提示（人名、术语）</label>
+            <input id="prompt" placeholder="Kubernetes, 李雪" autocomplete="off">
+          </div>
+          <div>
+            <label for="device">分离所用设备</label>
+            <select id="device">
+              <option value="auto" selected>自动（优先 GPU）</option>
+              <option value="mps">强制 GPU</option>
+              <option value="cpu">强制 CPU（慢 12 倍）</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <input type="checkbox" id="keep">
+          <label for="keep">保留静音处的文本（通常是模型幻觉，默认丢弃）</label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <span class="filename" id="fname"></span>
+        <button class="ghost" id="reset">换一个文件</button>
+        <button id="go">开始转写</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel hidden" id="prog">
+    <div class="steps">
+      <div class="step" data-s="decode">解码</div>
+      <div class="step" data-s="diarize">识别说话人</div>
+      <div class="step" data-s="transcribe">转写</div>
+      <div class="step" data-s="align">对齐</div>
+    </div>
+    <div class="bar"><i id="fill"></i></div>
+    <div class="pdetail"><span id="pdetail">准备中……</span><span id="peta"></span></div>
+  </section>
+
+  <section class="panel hidden" id="fail">
+    <div class="errbox" id="failmsg"></div>
+  </section>
+
+  <section class="panel hidden" id="out">
+    <div class="stats" id="stats"></div>
+    <div class="actions" style="margin:0 0 18px">
+      <button id="dl">下载 Markdown</button>
+      <button class="ghost" id="copy">复制全文</button>
+      <button class="ghost" id="dlj">下载 JSON</button>
+    </div>
+    <div id="turns"></div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STAGES = ["decode", "diarize", "transcribe", "align"];
+let file = null, jobId = null, poll = null, tick = null, started = 0, audioSeconds = null;
+
+/* ---------- 环境自检 ---------- */
+function linkify(text) {
+  const esc = text.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  return esc.replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+}
+async function checkEnv() {
+  try {
+    const e = await (await fetch("/api/env")).json();
+    $("ver").textContent = "v" + e.version;
+    const chip = (ok, label) => `<span class="chip"><i class="dot ${ok ? "ok" : "no"}"></i>${label}</span>`;
+    $("envrow").innerHTML =
+      chip(e.ffmpeg, "ffmpeg") +
+      chip(e.mps, e.mps ? "Metal GPU" : "无 GPU（将用 CPU）") +
+      chip(e.token, e.token ? "HF 令牌" : "缺少 HF 令牌") +
+      (e.token ? chip(e.model_access, "模型访问权限") : "") +
+      `<span class="chip" style="margin-left:auto">${e.asr_model.split("/").pop()}</span>`;
+    $("env").classList.toggle("bad", !e.ok);
+    if (e.problems.length) {
+      $("env").insertAdjacentHTML("beforeend",
+        e.problems.map(p => `<div class="problem">${linkify(p)}</div>`).join(""));
+    }
+    $("go").disabled = !e.ok;
+  } catch (err) {
+    $("envrow").textContent = "无法连接本地服务：" + err;
+  }
+}
+checkEnv();
+
+/* ---------- 选择文件 ---------- */
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files.length) accept(e.dataTransfer.files[0]);
+});
+$("file").addEventListener("change", (e) => { if (e.target.files.length) accept(e.target.files[0]); });
+
+function fmtSize(n) {
+  return n > 1024 ** 3 ? (n / 1024 ** 3).toFixed(1) + " GB" : (n / 1024 ** 2).toFixed(1) + " MB";
+}
+function accept(f) {
+  file = f;
+  $("fname").textContent = `${f.name} · ${fmtSize(f.size)}`;
+  $("form").classList.remove("hidden");
+  ["prog", "out", "fail"].forEach(id => $(id).classList.add("hidden"));
+  // 名字猜一下：中文界面默认按中文习惯留空，交给用户填。
+  $("names").focus();
+}
+$("reset").addEventListener("click", () => {
+  file = null; $("file").value = "";
+  $("form").classList.add("hidden");
+  ["prog", "out", "fail"].forEach(id => $(id).classList.add("hidden"));
+});
+
+/* ---------- 提交 ---------- */
+$("go").addEventListener("click", async () => {
+  if (!file) return;
+  const q = new URLSearchParams({
+    name: file.name,
+    num_speakers: $("num").value,
+    speakers: $("names").value,
+    language: $("lang").value,
+    device: $("device").value,
+    prompt: $("prompt").value,
+    keep_unmatched: $("keep").checked ? "1" : "0",
+  });
+  $("go").disabled = true;
+  $("prog").classList.remove("hidden");
+  ["out", "fail"].forEach(id => $(id).classList.add("hidden"));
+  setStage("decode", 0, "正在上传并解码……");
+  started = Date.now();
+
+  try {
+    const res = await fetch("/api/jobs?" + q, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    jobId = data.id;
+    poll = setInterval(check, 500);
+    tick = setInterval(interpolate, 200);
+  } catch (err) {
+    showError("提交失败：" + err.message);
+  }
+});
+
+/* ---------- 进度 ---------- */
+function setStage(stage, percent, detail) {
+  const at = STAGES.indexOf(stage);
+  document.querySelectorAll(".step").forEach((el) => {
+    const i = STAGES.indexOf(el.dataset.s);
+    el.classList.toggle("active", i === at);
+    el.classList.toggle("done", at >= 0 && i < at);
+  });
+  $("fill").style.width = Math.max(2, percent * 100).toFixed(1) + "%";
+  if (detail) $("pdetail").textContent = detail;
+}
+
+/* 转写阶段服务端没有细粒度进度（mlx-whisper 不提供回调），
+   按实测吞吐（约 16 倍速）在前端平滑推进，并显示「预计」字样。 */
+let lastServer = { stage: "decode", percent: 0, at: Date.now() };
+function interpolate() {
+  if (!audioSeconds || lastServer.stage !== "transcribe") return;
+  const expected = (audioSeconds / 16) * 1000;
+  const ratio = Math.min(0.97, (Date.now() - lastServer.at) / expected);
+  const base = 0.03 + 0.45;
+  $("fill").style.width = ((base + 0.45 * ratio) * 100).toFixed(1) + "%";
+  const left = Math.max(0, expected - (Date.now() - lastServer.at)) / 1000;
+  $("peta").textContent = left > 1 ? `预计还需 ${Math.ceil(left)} 秒` : "即将完成";
+}
+
+async function check() {
+  try {
+    const j = await (await fetch("/api/jobs/" + jobId)).json();
+    if (j.audio_seconds) audioSeconds = j.audio_seconds;
+    if (j.stage !== lastServer.stage) lastServer = { stage: j.stage, percent: j.percent, at: Date.now() };
+    if (j.state === "running") {
+      setStage(j.stage, j.percent, j.detail);
+      if (j.stage !== "transcribe") {
+        const el = (Date.now() - started) / 1000;
+        $("peta").textContent = `已用 ${el.toFixed(0)} 秒`;
+      }
+    } else if (j.state === "done") {
+      stop(); setStage("align", 1, j.detail); show(j);
+    } else if (j.state === "error") {
+      stop(); showError(j.error + (j.trace ? "\n\n" + j.trace : ""));
+    }
+  } catch (err) { /* 轮询偶发失败就等下一轮 */ }
+}
+function stop() {
+  clearInterval(poll); clearInterval(tick);
+  $("peta").textContent = ""; $("go").disabled = false;
+}
+function showError(msg) {
+  stop();
+  $("prog").classList.add("hidden");
+  $("fail").classList.remove("hidden");
+  $("failmsg").innerHTML = linkify(msg);
+}
+
+/* ---------- 结果 ---------- */
+function hms(s) {
+  s = Math.round(s);
+  const h = String(Math.floor(s / 3600)).padStart(2, "0");
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  return `${h}:${m}:${String(s % 60).padStart(2, "0")}`;
+}
+function show(j) {
+  $("prog").classList.add("hidden");
+  $("out").classList.remove("hidden");
+  const speed = j.audio_seconds / j.elapsed;
+  $("stats").innerHTML = [
+    `时长 <b>${hms(j.audio_seconds)}</b>`,
+    `说话人 <b>${(j.speakers || []).join("、") || "—"}</b>`,
+    `段落 <b>${(j.display_blocks || []).length}</b>`,
+    `词数 <b>${j.word_count}</b>`,
+    `耗时 <b>${j.elapsed.toFixed(0)} 秒</b>（${speed.toFixed(1)} 倍速）`,
+    j.dropped_words ? `丢弃静音处文本 <b>${j.dropped_words}</b> 词` : "",
+  ].filter(Boolean).map(t => `<span>${t}</span>`).join("");
+
+  const order = [];
+  $("turns").innerHTML = (j.display_blocks || []).map((b) => {
+    if (!order.includes(b.speaker)) order.push(b.speaker);
+    const idx = order.indexOf(b.speaker) % 4;
+    const esc = (s) => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    return `<div class="turn s${idx}">
+      <div class="tmeta"><span class="who">${esc(b.speaker)}</span>
+      <span class="when">${hms(b.start)} → ${hms(b.end)}</span></div>
+      <p class="said">${esc(b.text)}</p></div>`;
+  }).join("");
+
+  $("dl").onclick = () => location.assign(`/api/jobs/${jobId}/file?fmt=md`);
+  $("dlj").onclick = () => location.assign(`/api/jobs/${jobId}/file?fmt=json`);
+  $("copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(j.markdown); toast("已复制 Markdown 全文"); }
+    catch { toast("复制失败，请用下载按钮"); }
+  };
+}
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
+</script>
+</body>
+</html>

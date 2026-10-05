@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
@@ -145,11 +146,17 @@ def diarize(
     token: str | None = None,
     device: str = "auto",
     verbose: bool = False,
+    hook: Callable | None = None,
 ) -> list[Turn]:
     """把已解码的音频切分为若干说话人轮次。
 
     `num_speakers=None` 时由 pyannote 自行估计人数；传入真实人数
     （例如访谈场景的 2）能明显提高边界的准确度。
+
+    `hook` 为 pyannote 的进度回调，签名是
+    `(step_name, artifact, file=None, total=None, completed=None)`；
+    传入它可以把内部步骤的进度转出去（网页界面用它画进度条）。
+    若未传且 verbose 为真，则退回终端用的 ProgressHook。
     """
     import torch
 
@@ -164,11 +171,13 @@ def diarize(
 
     def run(dev: str):
         pipeline.to(torch.device(dev))
+        if hook is not None:
+            return pipeline(payload, num_speakers=num_speakers, hook=hook)
         if verbose:
             from pyannote.audio.pipelines.utils.hook import ProgressHook
 
-            with ProgressHook() as hook:
-                return pipeline(payload, num_speakers=num_speakers, hook=hook)
+            with ProgressHook() as progress:
+                return pipeline(payload, num_speakers=num_speakers, hook=progress)
         return pipeline(payload, num_speakers=num_speakers)
 
     device = pick_device(device)

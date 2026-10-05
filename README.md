@@ -78,7 +78,29 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 
 令牌**仅**用于首次下载模型。权重缓存完成后，断网也能正常转写。
 
-## 使用
+## 使用：网页界面（推荐）
+
+```bash
+./ui.sh
+```
+
+浏览器会自动打开 <http://127.0.0.1:8765>。把音频拖进去、选好人数和语言，就能
+看到分步进度，完成后直接预览转写稿，并下载 Markdown 或 JSON。
+
+界面顶部会实时显示环境自检（ffmpeg、GPU、令牌、模型权限）；缺什么就把对应的
+处理办法直接写在页面上，不用回到终端看报错。
+
+服务只监听 `127.0.0.1`，同一网络里的其他机器访问不到；音频存在系统临时目录，
+退出时自动清理。按 Control-C 停止。
+
+端口被占用时换一个：
+
+```bash
+./ui.sh --port 8780
+./ui.sh --no-open        # 不自动打开浏览器
+```
+
+## 使用：命令行
 
 ```bash
 ./transcribe.sh interview.m4a
@@ -210,6 +232,9 @@ pyannote 的语音活动检测来裁决：距离任何已检测语音超过 2 �
 
 ## 代码结构
 
+两个入口（`transcribe.sh` 命令行、`ui.sh` 网页界面）共用 `pipeline.py` 里的
+同一条流程，因此两者的处理顺序、参数含义和输出完全一致。
+
 ```
 mactranscript/
   audio.py      ffmpeg -> 16 kHz 单声道 float32
@@ -217,7 +242,11 @@ mactranscript/
   diarize.py    pyannote 管线、令牌处理、设备回退
   align.py      词级说话人归属、分段、命名
   render.py     Markdown 输出
-  cli.py        参数解析、环境自检、流程编排
+  pipeline.py   四个环节的编排，命令行与界面共用
+  cli.py        参数解析、环境自检
+  web.py        本地网页服务（仅用标准库）
+  static/
+    index.html  界面本体
 tests/
   test_align.py 对齐与渲染测试（无需加载模型）
 ```

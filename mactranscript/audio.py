@@ -63,6 +63,22 @@ def decode(path: str | Path) -> np.ndarray:
     return audio
 
 
+def probe_duration(path: str | Path) -> float | None:
+    """用 ffprobe 快速读出时长，不解码整个文件。取不到就返回 None。"""
+    exe = shutil.which("ffprobe")
+    if exe is None:
+        return None
+    proc = subprocess.run(
+        [exe, "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True,
+    )
+    try:
+        return float(proc.stdout.decode().strip())
+    except (ValueError, AttributeError):
+        return None
+
+
 def duration_of(audio: np.ndarray) -> float:
     """已解码缓冲区的长度，单位为秒。"""
     return len(audio) / SAMPLE_RATE

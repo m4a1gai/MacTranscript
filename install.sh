@@ -40,7 +40,10 @@ cat <<'TIP'
   在 https://huggingface.co/settings/tokens 创建 Read 令牌并保存：
     ./.venv/bin/hf auth login
 
-  然后就可以转写了：
+  然后打开网页界面（推荐）：
+    ./ui.sh
+
+  或者用命令行：
     ./transcribe.sh recording.m4a
 
 TIP
