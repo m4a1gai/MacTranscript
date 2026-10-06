@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import atexit
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -36,7 +38,10 @@ _server: ThreadingHTTPServer | None = None
 
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
-_uploads = Path(tempfile.mkdtemp(prefix="mactranscript-"))
+# 目录名里带上 PID：进程被强杀后，下次启动就能准确认出哪些是孤儿目录，
+# 不必靠「超过几小时就删」这种可能误伤并发实例的猜测。
+_uploads = Path(tempfile.mkdtemp(prefix=f"mactranscript-{os.getpid()}-"))
+atexit.register(lambda: shutil.rmtree(_uploads, ignore_errors=True))
 
 
 def _job_update(job_id: str, **fields) -> None:
@@ -327,6 +332,63 @@ class Handler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.ACCEPTED, {"id": job_id})
 
 
+def find_port(start: int = 8765, tries: int = 12) -> int | None:
+    """找一个空闲端口；全被占用时返回 None。"""
+    import socket
+
+    for port in range(start, start + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return None
+
+
+def cleanup() -> None:
+    """删掉本次运行的上传目录。"""
+    shutil.rmtree(_uploads, ignore_errors=True)
+
+
+def sweep_orphaned() -> None:
+    """删掉已退出进程遗留的上传目录。
+
+    从 Dock 右键退出或按 Cmd-Q 时，macOS 会直接终止进程，Python 的清理
+    逻辑根本来不及跑，用户的录音就留在 /var/folders 里了。启动时按目录名
+    里的 PID 判断：进程没了就删，还活着就留着（可能是并发的另一个实例）。
+    """
+    for path in Path(tempfile.gettempdir()).glob("mactranscript-*"):
+        if path == _uploads or not path.is_dir():
+            continue
+        parts = path.name.split("-")
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue  # 旧版本留下的，名字里没有 PID
+        try:
+            os.kill(int(parts[1]), 0)  # 不发信号，只探测进程在不在
+        except ProcessLookupError:
+            shutil.rmtree(path, ignore_errors=True)
+        except (PermissionError, ValueError):
+            pass  # 进程还在，或名字对不上，都别动
+
+
+def make_server(port: int) -> ThreadingHTTPServer:
+    """在回环地址上建服务，并记下实例供 /api/quit 使用。"""
+    global _server
+
+    sweep_orphaned()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    _server = httpd
+    return httpd
+
+
+def start_background(port: int) -> ThreadingHTTPServer:
+    """在后台线程里跑服务并立即返回 —— 原生窗口要占用主线程。"""
+    httpd = make_server(port)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
 def serve(argv: list[str] | None = None) -> int:
     """启动本地网页界面。"""
     import argparse
@@ -339,14 +401,11 @@ def serve(argv: list[str] | None = None) -> int:
 
     # 只绑定回环地址：同一网络里的其他机器无法访问。
     try:
-        httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        httpd = make_server(args.port)
     except OSError as exc:
         print(f"错误：无法监听 127.0.0.1:{args.port} —— {exc}")
         print("端口可能已被占用，换一个：./ui.sh --port 8780")
         return 1
-
-    global _server
-    _server = httpd
 
     url = f"http://127.0.0.1:{args.port}/"
     print(f"MacTranscript {__version__} 网页界面已启动")
@@ -363,5 +422,5 @@ def serve(argv: list[str] | None = None) -> int:
         print("\n正在停止……")
     finally:
         httpd.server_close()
-        shutil.rmtree(_uploads, ignore_errors=True)
+        cleanup()
     return 0

@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mactranscript",
         description="在本机离线转写音频文件，输出带说话人标注和时间戳的 Markdown。",
-        epilog="运行 'mactranscript ui' 打开网页界面，'mactranscript setup' 检查安装环境。",
+        epilog="运行 'mactranscript app' 打开原生窗口，'mactranscript setup' 检查安装环境。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("audio", type=Path, help="输入文件（.m4a、.mp3、.wav 等）")
@@ -168,7 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     # 单独识别这些动词，使 `transcribe.sh setup` / `ui` 无需引入子命令的复杂度。
     if argv and argv[0] in ("setup", "check", "doctor"):
         return cmd_setup()
-    if argv and argv[0] in ("ui", "web", "gui"):
+    if argv and argv[0] in ("app", "window"):
+        from .app import run
+
+        return run(argv[1:])
+    if argv and argv[0] in ("ui", "web", "browser"):
         from .web import serve
 
         return serve(argv[1:])

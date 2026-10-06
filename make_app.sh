@@ -29,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key>    <string>1.0.0</string>
   <key>LSMinimumSystemVersion</key>        <string>12.0</string>
   <key>NSHighResolutionCapable</key>       <true/>
+  <key>LSMultipleInstancesProhibited</key> <true/>
 </dict>
 </plist>
 PLIST
@@ -40,47 +41,26 @@ cat > "$APP/Contents/MacOS/MacTranscript" <<'LAUNCHER'
 # 由 make_app.sh 生成，请勿直接编辑。
 PROJECT="__PROJECT__"
 LOG="$HOME/Library/Logs/MacTranscript.log"
-PORTS="8765 8766 8767 8768 8769"
+PY="$PROJECT/.venv/bin/python"
 
 fail() {
   osascript -e "display dialog \"$1\" buttons {\"好\"} default button 1 \
     with title \"MacTranscript\" with icon stop" >/dev/null 2>&1
   exit 1
 }
-alive() { curl -fsS -m 2 "http://127.0.0.1:$1/api/env" >/dev/null 2>&1; }
 
-# 1) 服务已经在跑，直接打开页面
-for p in $PORTS; do
-  if alive "$p"; then open "http://127.0.0.1:$p/"; exit 0; fi
-done
+[ -x "$PY" ] || fail "找不到运行环境：\n$PROJECT/.venv\n\n请先在项目目录里运行 ./install.sh"
 
-# 2) 确认依赖装好了
-if [ ! -x "$PROJECT/.venv/bin/python" ]; then
-  fail "找不到运行环境：\n$PROJECT/.venv\n\n请先在项目目录里运行 ./install.sh"
-fi
+# 先把会导致秒退的问题挡在前面 —— exec 之后就没机会弹窗了
+"$PY" -c "import webview" 2>/dev/null \
+  || fail "缺少 pywebview，无法打开窗口。\n\n请在项目目录运行 ./install.sh"
 
-# 3) 挑一个空闲端口
-PORT=""
-for p in $PORTS; do
-  if ! nc -z 127.0.0.1 "$p" >/dev/null 2>&1; then PORT="$p"; break; fi
-done
-[ -n "$PORT" ] || fail "8765-8769 端口都被占用了，请先关掉占用的程序。"
-
-osascript -e 'display notification "正在启动，稍候会自动打开浏览器…" \
-  with title "MacTranscript"' >/dev/null 2>&1
-
-# 4) 后台启动服务；关掉这个启动器不会影响它
 mkdir -p "$(dirname "$LOG")"
 cd "$PROJECT" || fail "项目目录不存在：$PROJECT"
-nohup "$PROJECT/.venv/bin/python" -m mactranscript ui \
-  --port "$PORT" --no-open >>"$LOG" 2>&1 &
 
-# 5) 等它能应答再打开浏览器（首次加载依赖会慢一些）
-for _ in $(seq 1 90); do
-  if alive "$PORT"; then open "http://127.0.0.1:$PORT/"; exit 0; fi
-  sleep 1
-done
-fail "启动超时。日志在：\n$LOG\n\n$(tail -n 6 "$LOG" 2>/dev/null)"
+# exec 让 python 取代 shell，使窗口进程就是这个 app 本身：
+# 关窗即退出，Cmd-Q 正常，Dock 里只有一个图标。
+exec "$PY" -m mactranscript app >>"$LOG" 2>&1
 LAUNCHER
 
 # 把真实路径写进去（用 | 作分隔符，免得路径里的 / 干扰）

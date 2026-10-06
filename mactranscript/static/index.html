@@ -437,12 +437,18 @@ function show(j) {
     catch { toast("复制失败，请用下载按钮"); }
   };
 }
-$("quit").addEventListener("click", async () => {
-  try { await fetch("/api/quit", { method: "POST" }); } catch (e) { /* 服务已经走了 */ }
-  document.querySelector(".wrap").innerHTML =
-    '<div id="stopped"><h2>服务已停止</h2>' +
-    '<p>可以关闭这个标签页了。<br>需要再次使用时，双击 MacTranscript 图标。</p></div>';
-});
+// 原生窗口里关窗即退出，留着「停止服务」只会让人困惑。
+if (new URLSearchParams(location.search).get("app") === "1") {
+  $("quit").remove();
+  $("foot").textContent = "录音与转写稿都只在这台 Mac 上";
+} else {
+  $("quit").addEventListener("click", async () => {
+    try { await fetch("/api/quit", { method: "POST" }); } catch (e) { /* 服务已经走了 */ }
+    document.querySelector(".wrap").innerHTML =
+      '<div id="stopped"><h2>服务已停止</h2>' +
+      '<p>可以关闭这个标签页了。<br>需要再次使用时，双击 MacTranscript 图标。</p></div>';
+  });
+}
 
 function toast(msg) {
   const t = $("toast");

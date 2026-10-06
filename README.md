@@ -80,13 +80,14 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 
 ## 使用：双击 App（推荐）
 
-`./install.sh` 会生成 **MacTranscript.app**，双击即可 —— 它会在后台拉起本地
-服务并自动打开浏览器，全程不需要终端。
+`./install.sh` 会生成 **MacTranscript.app**，双击即可 —— 界面就在应用自己的
+窗口里，不会跳转浏览器，也看不到地址栏。有独立的 Dock 图标、菜单栏和 Cmd-Q。
 
 把它拖进「应用程序」文件夹，就能从启动台或 Dock 打开。
 
-- 重复双击不会启动第二个服务，只会把已有页面重新打开
-- 用完点页面底部的**停止服务**即可退出；关掉浏览器不会停止服务
+- 重复双击不会开第二个窗口，只会把已有窗口切到前台
+- 关闭窗口或按 Cmd-Q 即退出，本地服务随之停止
+- 窗口是 WKWebView 承载的，因此拖放、文件选择都走 macOS 原生面板
 - 启动日志在 `~/Library/Logs/MacTranscript.log`
 
 项目目录移动过之后，重新生成一次：
@@ -98,7 +99,9 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 > App 没有经过 Apple 签名。因为是你本机构建的，不会被 Gatekeeper 拦截；
 > 但如果你把它拷到别的机器，首次打开需要在「系统设置 › 隐私与安全性」里放行。
 
-## 使用：网页界面
+## 使用：浏览器界面
+
+如果更习惯在浏览器里用（比如想开多个标签页对照），还有这个入口：
 
 ```bash
 ./ui.sh
@@ -252,7 +255,7 @@ pyannote 的语音活动检测来裁决：距离任何已检测语音超过 2 �
 
 ## 代码结构
 
-三个入口（MacTranscript.app、`ui.sh` 网页界面、`transcribe.sh` 命令行）
+三个入口（MacTranscript.app 原生窗口、`ui.sh` 浏览器、`transcribe.sh` 命令行）
 共用 `pipeline.py` 里的同一条流程，因此两者的处理顺序、参数含义和输出完全一致。
 
 ```
@@ -264,7 +267,8 @@ mactranscript/
   render.py     Markdown 输出
   pipeline.py   四个环节的编排，命令行与界面共用
   cli.py        参数解析、环境自检
-  web.py        本地网页服务（仅用标准库）
+  web.py        本地服务（仅用标准库）
+  app.py        原生窗口（WKWebView）
   static/
     index.html  界面本体
 tools/
