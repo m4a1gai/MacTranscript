@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import time
 import unicodedata
 from pathlib import Path
 
 from . import __version__, asr, diarize, pipeline
-from .audio import AudioError
+from .audio import AudioError, find_tool
 
 
 def _pad(text: str, width: int) -> str:
@@ -102,7 +101,7 @@ def cmd_setup() -> int:
         print(f"  {'ok ' if ok else 'XX '} {_pad(label, 18)} {detail}")
 
     # ffmpeg
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = find_tool("ffmpeg")
     row("ffmpeg", bool(ffmpeg), ffmpeg or "未找到")
     if not ffmpeg:
         problems.append("安装 ffmpeg：brew install ffmpeg")

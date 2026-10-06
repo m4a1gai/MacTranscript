@@ -26,7 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__, asr, diarize, pipeline
-from .audio import AudioError, probe_duration
+from .audio import AudioError, find_tool, probe_duration
 
 STATIC = Path(__file__).parent / "static"
 
@@ -125,7 +125,7 @@ def _environment() -> dict:
     """界面启动时显示的环境自检结果。"""
     info: dict = {"version": __version__, "ok": True, "problems": []}
 
-    info["ffmpeg"] = bool(shutil.which("ffmpeg"))
+    info["ffmpeg"] = bool(find_tool("ffmpeg"))
     if not info["ffmpeg"]:
         info["ok"] = False
         info["problems"].append("缺少 ffmpeg，请执行：brew install ffmpeg")

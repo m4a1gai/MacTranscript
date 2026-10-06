@@ -43,6 +43,10 @@ PROJECT="__PROJECT__"
 LOG="$HOME/Library/Logs/MacTranscript.log"
 PY="$PROJECT/.venv/bin/python"
 
+# 从 Finder 启动拿不到登录 shell 的 PATH，GUI 会话的默认 PATH 里没有
+# Homebrew。代码里已有兜底查找，这里再补一层，让子进程也能直接用。
+export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
+
 fail() {
   osascript -e "display dialog \"$1\" buttons {\"好\"} default button 1 \
     with title \"MacTranscript\" with icon stop" >/dev/null 2>&1

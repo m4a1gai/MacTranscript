@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,15 +14,37 @@ import numpy as np
 SAMPLE_RATE = 16_000
 
 
+# 从 Finder 双击启动的 app 继承不到登录 shell 的 PATH —— GUI 会话的默认
+# PATH 里没有 Homebrew 目录，于是 shutil.which 会白白找不到 ffmpeg。
+# 所以除了 PATH，还要去这几个常见安装位置看一眼。
+EXTRA_TOOL_DIRS = (
+    "/opt/homebrew/bin",  # Apple Silicon 版 Homebrew
+    "/usr/local/bin",     # Intel 版 Homebrew
+    "/opt/local/bin",     # MacPorts
+)
+
+
 class AudioError(RuntimeError):
     """文件找不到或无法解码时抛出。"""
 
 
+def find_tool(name: str) -> str | None:
+    """先按 PATH 找，再退回到常见安装位置。找不到返回 None。"""
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in EXTRA_TOOL_DIRS:
+        candidate = Path(directory) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def find_ffmpeg() -> str:
-    exe = shutil.which("ffmpeg")
+    exe = find_tool("ffmpeg")
     if exe is None:
         raise AudioError(
-            "在 PATH 中找不到 ffmpeg。\n"
+            "找不到 ffmpeg。\n"
             "请执行：brew install ffmpeg"
         )
     return exe
@@ -65,7 +88,7 @@ def decode(path: str | Path) -> np.ndarray:
 
 def probe_duration(path: str | Path) -> float | None:
     """用 ffprobe 快速读出时长，不解码整个文件。取不到就返回 None。"""
-    exe = shutil.which("ffprobe")
+    exe = find_tool("ffprobe")
     if exe is None:
         return None
     proc = subprocess.run(
