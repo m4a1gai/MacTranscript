@@ -100,6 +100,58 @@ def load(session_id: str) -> dict | None:
     return meta
 
 
+def rename_speakers(session_id: str, mapping: dict[str, str]) -> dict | None:
+    """改写说话人的展示名，并按新名字重新生成成稿。
+
+    分离模型只能分出「有几个人、各自在什么时候说话」，它分不出谁是谁 ——
+    所以默认按首次发言顺序编号。听过之后发现认反了是很正常的事，这里让
+    结果可以事后纠正，而不必重跑一遍转写。
+
+    原始标签（SPEAKER_00…）保持不变，只改展示名，因此可以反复调整。
+    """
+    from .align import Block
+    from .render import render
+
+    record = load(session_id)
+    if record is None:
+        return None
+
+    payload = record["payload"]
+    names = dict(payload.get("speaker_names") or {})
+    for raw, display in mapping.items():
+        if raw in names and str(display).strip():
+            names[raw] = str(display).strip()
+    payload["speaker_names"] = names
+
+    blocks = [
+        Block(b["speaker"], float(b["start"]), float(b["end"]), b["text"])
+        for b in payload.get("blocks", [])
+    ]
+    markdown = render(
+        blocks,
+        names,
+        source=Path(record["name"]),
+        audio_seconds=record.get("duration_seconds") or 0.0,
+        asr_model=record.get("asr_model", ""),
+        diarization_model=record.get("diarization_model", ""),
+        elapsed=record.get("elapsed"),
+    )
+
+    meta = {k: v for k, v in record.items() if k not in ("markdown", "payload")}
+    meta["speakers"] = list(dict.fromkeys(names.values()))
+
+    folder = root() / session_id
+    (folder / "transcript.md").write_text(markdown, encoding="utf-8")
+    (folder / "data.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    (folder / "meta.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    meta["markdown"] = markdown
+    meta["payload"] = payload
+    return meta
+
+
 def delete(session_id: str) -> bool:
     folder = _folder(session_id)
     if folder is None:

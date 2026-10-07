@@ -112,6 +112,7 @@ def _run_job(job_id: str, path: Path, options: dict) -> None:
                 "word_count": result.word_count,
                 "dropped_words": result.dropped_words,
                 "asr_model": options["model"],
+                "diarization_model": diarize.DEFAULT_MODEL,
             },
         )["id"]
     except OSError as exc:  # 存不下也不该丢掉这次结果
@@ -131,6 +132,8 @@ def _run_job(job_id: str, path: Path, options: dict) -> None:
         dropped_words=result.dropped_words,
         word_count=result.word_count,
         speakers=speakers,
+        # 界面要靠原始标签才能改名，展示名列表不够用
+        speaker_names=result.speaker_names,
         # 界面直接拿这个渲染，说话人已经换成展示名称。
         display_blocks=[
             {
@@ -247,6 +250,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path)
+        # 改说话人名字：/api/sessions/<id>/speakers
+        if route.path.startswith("/api/sessions/") and route.path.endswith("/speakers"):
+            session_id = route.path[len("/api/sessions/"):-len("/speakers")]
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                mapping = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, OSError):
+                self._error(HTTPStatus.BAD_REQUEST, "请求内容不是合法的 JSON")
+                return
+            if not isinstance(mapping, dict):
+                self._error(HTTPStatus.BAD_REQUEST, "需要一个 标签->名字 的对象")
+                return
+            record = sessions.rename_speakers(session_id, mapping)
+            if record is None:
+                self._error(HTTPStatus.NOT_FOUND, "转录记录不存在")
+            else:
+                self._json(HTTPStatus.OK, record)
+            return
         if route.path == "/api/quit":
             self._json(HTTPStatus.OK, {"stopping": True})
             # 必须另起线程：shutdown() 会等 serve_forever 退出，

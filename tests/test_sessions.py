@@ -23,6 +23,17 @@ PAYLOAD = {"blocks": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0, "text"
 META = {"duration_seconds": 33.4, "speakers": ["我", "教授"],
         "block_count": 6, "word_count": 89}
 
+TWO = {
+    "speaker_names": {"SPEAKER_00": "说话人 1", "SPEAKER_01": "说话人 2"},
+    "blocks": [
+        {"speaker": "SPEAKER_00", "start": 0.0, "end": 2.0, "text": "先开口的"},
+        {"speaker": "SPEAKER_01", "start": 2.0, "end": 4.0, "text": "后开口的"},
+    ],
+}
+TWO_META = {"duration_seconds": 4.0, "elapsed": 1.0, "asr_model": "w",
+            "diarization_model": "p", "speakers": ["说话人 1", "说话人 2"],
+            "block_count": 2, "word_count": 6}
+
 
 def _save(name="会议.m4a"):
     return sessions.save(name, "# 转写稿", PAYLOAD, META)
@@ -70,6 +81,49 @@ def test_挡住路径穿越():
 def test_中文文件名能作为目录名():
     record = _save("季度会议 2026.m4a")
     assert sessions.load(record["id"])["name"] == "季度会议 2026.m4a"
+
+
+def test_改名后成稿与元信息一起更新():
+    record = sessions.save("会议.m4a", "旧稿", dict(TWO), dict(TWO_META))
+    updated = sessions.rename_speakers(record["id"], {"SPEAKER_00": "教授", "SPEAKER_01": "我"})
+    assert updated["speakers"] == ["教授", "我"]
+    assert "**教授** · `00:00:00 → 00:00:02`" in updated["markdown"]
+    assert "**我** · `00:00:02 → 00:00:04`" in updated["markdown"]
+
+
+def test_改名会落盘():
+    record = sessions.save("会议.m4a", "旧稿", dict(TWO), dict(TWO_META))
+    sessions.rename_speakers(record["id"], {"SPEAKER_00": "教授", "SPEAKER_01": "我"})
+    reloaded = sessions.load(record["id"])
+    assert reloaded["speakers"] == ["教授", "我"]
+    assert reloaded["payload"]["speaker_names"]["SPEAKER_00"] == "教授"
+    assert "教授" in reloaded["markdown"]
+
+
+def test_可以反复改名():
+    # 原始标签不变，所以改完还能再改 —— 认错两次也救得回来。
+    record = sessions.save("会议.m4a", "旧稿", dict(TWO), dict(TWO_META))
+    sessions.rename_speakers(record["id"], {"SPEAKER_00": "甲"})
+    updated = sessions.rename_speakers(record["id"], {"SPEAKER_00": "乙"})
+    assert updated["payload"]["speaker_names"]["SPEAKER_00"] == "乙"
+
+
+def test_只改传入的那一个():
+    record = sessions.save("会议.m4a", "旧稿", dict(TWO), dict(TWO_META))
+    updated = sessions.rename_speakers(record["id"], {"SPEAKER_01": "我"})
+    assert updated["payload"]["speaker_names"] == {"SPEAKER_00": "说话人 1", "SPEAKER_01": "我"}
+
+
+def test_空名字与未知标签被忽略():
+    record = sessions.save("会议.m4a", "旧稿", dict(TWO), dict(TWO_META))
+    updated = sessions.rename_speakers(
+        record["id"], {"SPEAKER_00": "   ", "SPEAKER_99": "查无此人"})
+    assert updated["payload"]["speaker_names"] == TWO["speaker_names"]
+
+
+def test_给不存在的记录改名返回None():
+    assert sessions.rename_speakers("20260101-000000-abcdef", {"X": "Y"}) is None
+    assert sessions.rename_speakers("../../etc", {"X": "Y"}) is None
 
 
 if __name__ == "__main__":
