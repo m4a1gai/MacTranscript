@@ -86,7 +86,9 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 把它拖进「应用程序」文件夹，就能从启动台或 Dock 打开。
 
 - 重复双击不会开第二个窗口，只会把已有窗口切到前台
-- 关闭窗口或按 Cmd-Q 即退出，本地服务随之停止
+- **每次转录都会自动存成一条记录**，关窗、退出都不会丢；在「历史记录」里
+  随时点开、重新下载或删除
+- 关闭窗口或按 Cmd-Q 即退出；若转录还在进行中会先确认一次
 - 窗口是 WKWebView 承载的，因此拖放、文件选择都走 macOS 原生面板
 - 启动日志在 `~/Library/Logs/MacTranscript.log`
 
@@ -132,8 +134,8 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 结果会写到输入文件旁边的 `interview.md`。常用变体：
 
 ```bash
-# 指定说话人名字，顺序按谁先开口
-./transcribe.sh interview.m4a --speakers "张三,李四"
+# 指定说话人名字，顺序按谁先开口（中英文标点都认）
+./transcribe.sh interview.m4a --speakers "张三，李四"
 
 # 指定输出位置，或直接输出到标准输出
 ./transcribe.sh interview.m4a -o notes/interview.md
@@ -158,7 +160,7 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
 | `-o, --output` | `名称.md` | 输出路径，填 `-` 表示标准输出 |
-| `-s, --speakers` | `说话人 1、2…` | 按首次发言顺序排列的名字 |
+| `-s, --speakers` | `说话人 1、2…` | 按首次发言顺序排列的名字；中英文逗号、顿号、分号都可作分隔 |
 | `-n, --num-speakers` | `2` | 预期说话人数量，或 `auto` |
 | `--language` | `en` | 语言 ISO 代码，或 `auto` 自动检测 |
 | `--model` | `mlx-community/whisper-large-v3-turbo` | Whisper 权重 |
@@ -203,6 +205,22 @@ pyannote 的权重是免费开源的，但仓库为**受限访问**（gated）�
 | `mlx-community/whisper-medium-mlx` | 约 1.5 GB | 更快，专有名词偏弱 |
 | `mlx-community/whisper-small-mlx` | 约 0.5 GB | 仅适合快速草稿 |
 
+### 转录记录
+
+每次转录完成都会写到：
+
+```
+~/Library/Application Support/MacTranscript/sessions/<时间戳>/
+  transcript.md   成稿
+  data.json       逐轮次、逐段落的结构化数据
+  meta.json       时长、说话人、词数等摘要
+```
+
+界面里的「历史记录」读的就是这个目录。删除某条记录会连同目录一起删掉。
+想换位置的话，设环境变量 `MACTRANSCRIPT_HOME` 即可。
+
+命令行模式不写这里 —— 它直接把 Markdown 写到你指定的路径。
+
 ### 静音与模型幻觉
 
 Whisper 会在长段静音处编造文本 —— 诸如「Thank you.」「[BLANK_AUDIO]」——
@@ -223,11 +241,13 @@ pyannote 的语音活动检测来裁决：距离任何已检测语音超过 2 �
 ## 测试
 
 ```bash
-./.venv/bin/python tests/test_align.py
+./.venv/bin/python tests/test_align.py      # 对齐与渲染
+./.venv/bin/python tests/test_sessions.py   # 转录记录持久化
 ```
 
-覆盖了对齐环节的各种边界情况：跨轮次边界的词、落在空隙中的词、抖动平滑、
-段落合并，以及说话人命名。
+覆盖对齐环节的各种边界情况（跨轮次边界的词、落在空隙中的词、抖动平滑、
+段落合并、说话人命名、名字的中英文标点切分），以及记录的保存、读取、
+倒序排列、删除和路径穿越防护。
 
 ## 常见问题
 
@@ -268,7 +288,8 @@ mactranscript/
   pipeline.py   四个环节的编排，命令行与界面共用
   cli.py        参数解析、环境自检
   web.py        本地服务（仅用标准库）
-  app.py        原生窗口（WKWebView）
+  app.py        原生窗口（WKWebView）与系统保存面板
+  sessions.py   转录记录的持久化
   static/
     index.html  界面本体
 tools/

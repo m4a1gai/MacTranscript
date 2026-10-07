@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,18 @@ DIARIZE_STEPS = ["segmentation", "speaker_counting", "embeddings", "discrete_dia
 
 # 进度回调：(环节, 说明, 总体进度 0..1)
 ProgressFn = Callable[[str, str, float], None]
+
+# 说话人名字的分隔符。中文输入法下打出来的是全角逗号和顿号，只认半角
+# 逗号的话，「我，教授」会被当成一个人的名字。
+NAME_SEPARATORS = r"[,，、;；\s]+"
+
+
+def parse_speaker_names(raw: str | None) -> list[str] | None:
+    """把用户输入的名字串切成列表；没写就返回 None。"""
+    if not raw:
+        return None
+    names = [n.strip() for n in re.split(NAME_SEPARATORS, raw) if n.strip()]
+    return names or None
 
 
 @dataclass

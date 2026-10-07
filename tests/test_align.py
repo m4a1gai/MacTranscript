@@ -18,6 +18,7 @@ from mactranscript.align import (  # noqa: E402
 )
 from mactranscript.asr import Word  # noqa: E402
 from mactranscript.diarize import Turn  # noqa: E402
+from mactranscript.pipeline import parse_speaker_names  # noqa: E402
 from mactranscript.render import render, timestamp  # noqa: E402
 
 A, B = "SPEAKER_00", "SPEAKER_01"
@@ -151,6 +152,26 @@ def test_渲染能处理全静音():
     md = render([], {}, source=Path("quiet.m4a"), audio_seconds=1.0,
                 asr_model="w", diarization_model="p")
     assert "未检测到语音" in md
+
+
+def test_说话人名字按中英文标点切分():
+    # 中文输入法打出来的是全角逗号，只认半角会把「我，教授」当成一个人。
+    assert parse_speaker_names("我，教授") == ["我", "教授"]
+    assert parse_speaker_names("张三,李四") == ["张三", "李四"]
+    assert parse_speaker_names("张三、李四") == ["张三", "李四"]
+    assert parse_speaker_names("张三；李四") == ["张三", "李四"]
+    assert parse_speaker_names("Alice, Bob") == ["Alice", "Bob"]
+
+
+def test_说话人名字为空时返回None():
+    assert parse_speaker_names("") is None
+    assert parse_speaker_names(None) is None
+    assert parse_speaker_names("   ") is None
+    assert parse_speaker_names("，、,") is None
+
+
+def test_单个名字也能正常解析():
+    assert parse_speaker_names("教授") == ["教授"]
 
 
 if __name__ == "__main__":

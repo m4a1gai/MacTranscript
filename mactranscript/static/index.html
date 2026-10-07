@@ -130,6 +130,23 @@
   .s2 .who { color: var(--sp3); } .s3 .who { color: var(--sp4); }
   .errbox { color: var(--err); white-space: pre-wrap; font-size: 13.5px; line-height: 1.7; }
   .hidden { display: none !important; }
+  /* 历史记录 */
+  .hhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .hhead h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .hhead span { color: var(--muted); font-size: 12.5px; }
+  .srow { display: flex; align-items: center; gap: 12px; padding: 11px 2px;
+          border-top: 1px solid var(--line); cursor: pointer; }
+  .srow:hover { background: var(--accent-soft); margin: 0 -10px; padding-left: 12px;
+                padding-right: 12px; border-radius: 8px; border-top-color: transparent; }
+  .sname { font-weight: 500; font-size: 14px; flex: 1; min-width: 0;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smeta { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .sdel { background: none; border: 0; color: var(--muted); font-size: 16px;
+          padding: 2px 8px; border-radius: 6px; line-height: 1; cursor: pointer; }
+  .sdel:hover { color: var(--err); background: var(--line); }
+  .active-row { background: var(--accent-soft); margin: 0 -10px;
+                padding-left: 12px; padding-right: 12px; border-radius: 8px; }
+
   footer { margin-top: 28px; text-align: center; font-size: 12.5px; color: var(--muted); }
   footer button { background: none; color: var(--muted); border: 1px solid var(--line);
                   padding: 6px 14px; font-size: 12.5px; border-radius: 7px; }
@@ -234,6 +251,11 @@
     <div class="errbox" id="failmsg"></div>
   </section>
 
+  <section class="panel hidden" id="history">
+    <div class="hhead"><h2>历史记录</h2><span id="hcount"></span></div>
+    <div id="hlist"></div>
+  </section>
+
   <section class="panel hidden" id="out">
     <div class="stats" id="stats"></div>
     <div class="actions" style="margin:0 0 18px">
@@ -257,8 +279,8 @@ let file = null, jobId = null, poll = null, tick = null, started = 0, audioSecon
 
 /* ---------- 环境自检 ---------- */
 function linkify(text) {
-  const esc = text.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-  return esc.replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+  const safe = text.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  return safe.replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
 }
 async function checkEnv() {
   try {
@@ -406,49 +428,145 @@ function hms(s) {
   const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
   return `${h}:${m}:${String(s % 60).padStart(2, "0")}`;
 }
+const esc = (s) => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
 function show(j) {
+  render({
+    sessionId: j.session_id, jobId: j.id, name: j.name,
+    duration: j.audio_seconds, elapsed: j.elapsed, speakers: j.speakers,
+    wordCount: j.word_count, dropped: j.dropped_words,
+    blocks: j.display_blocks || [], markdown: j.markdown,
+  });
+  loadSessions();
+}
+
+/* 历史记录里存的是原始标签，取出来时按 speaker_names 映射成展示名。 */
+function fromPayload(rec) {
+  const names = (rec.payload && rec.payload.speaker_names) || {};
+  return {
+    sessionId: rec.id, name: rec.name,
+    duration: rec.duration_seconds, elapsed: rec.elapsed, speakers: rec.speakers,
+    wordCount: rec.word_count, dropped: rec.dropped_words,
+    blocks: ((rec.payload && rec.payload.blocks) || []).map(b => ({
+      speaker: names[b.speaker] || b.speaker, start: b.start, end: b.end, text: b.text,
+    })),
+    markdown: rec.markdown,
+  };
+}
+
+let current = null;
+
+function render(d) {
+  current = d;
   $("prog").classList.add("hidden");
+  $("fail").classList.add("hidden");
   $("out").classList.remove("hidden");
-  const speed = j.audio_seconds / j.elapsed;
+
+  const speed = d.elapsed ? d.duration / d.elapsed : 0;
   $("stats").innerHTML = [
-    `时长 <b>${hms(j.audio_seconds)}</b>`,
-    `说话人 <b>${(j.speakers || []).join("、") || "—"}</b>`,
-    `段落 <b>${(j.display_blocks || []).length}</b>`,
-    `词数 <b>${j.word_count}</b>`,
-    `耗时 <b>${j.elapsed.toFixed(0)} 秒</b>（${speed.toFixed(1)} 倍速）`,
-    j.dropped_words ? `丢弃静音处文本 <b>${j.dropped_words}</b> 词` : "",
+    `时长 <b>${hms(d.duration)}</b>`,
+    `说话人 <b>${(d.speakers || []).join("、") || "—"}</b>`,
+    `段落 <b>${d.blocks.length}</b>`,
+    `词数 <b>${d.wordCount}</b>`,
+    d.elapsed ? `耗时 <b>${d.elapsed.toFixed(0)} 秒</b>（${speed.toFixed(1)} 倍速）` : "",
+    d.dropped ? `丢弃静音处文本 <b>${d.dropped}</b> 词` : "",
   ].filter(Boolean).map(t => `<span>${t}</span>`).join("");
 
   const order = [];
-  $("turns").innerHTML = (j.display_blocks || []).map((b) => {
+  $("turns").innerHTML = d.blocks.map((b) => {
     if (!order.includes(b.speaker)) order.push(b.speaker);
     const idx = order.indexOf(b.speaker) % 4;
-    const esc = (s) => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     return `<div class="turn s${idx}">
       <div class="tmeta"><span class="who">${esc(b.speaker)}</span>
       <span class="when">${hms(b.start)} → ${hms(b.end)}</span></div>
       <p class="said">${esc(b.text)}</p></div>`;
   }).join("");
 
-  $("dl").onclick = () => location.assign(`/api/jobs/${jobId}/file?fmt=md`);
-  $("dlj").onclick = () => location.assign(`/api/jobs/${jobId}/file?fmt=json`);
+  $("dl").onclick = () => download("md");
+  $("dlj").onclick = () => download("json");
   $("copy").onclick = async () => {
-    try { await navigator.clipboard.writeText(j.markdown); toast("已复制 Markdown 全文"); }
+    try { await navigator.clipboard.writeText(d.markdown); toast("已复制 Markdown 全文"); }
     catch { toast("复制失败，请用下载按钮"); }
   };
+  markActive();
 }
-// 原生窗口里关窗即退出，留着「停止服务」只会让人困惑。
-if (new URLSearchParams(location.search).get("app") === "1") {
-  $("quit").remove();
-  $("foot").textContent = "录音与转写稿都只在这台 Mac 上";
-} else {
-  $("quit").addEventListener("click", async () => {
-    try { await fetch("/api/quit", { method: "POST" }); } catch (e) { /* 服务已经走了 */ }
-    document.querySelector(".wrap").innerHTML =
-      '<div id="stopped"><h2>服务已停止</h2>' +
-      '<p>可以关闭这个标签页了。<br>需要再次使用时，双击 MacTranscript 图标。</p></div>';
+
+/* WKWebView 不处理附件下载 —— 点一下只会把页面导航走，文件也没存下来。
+   所以原生窗口里把内容交给 Python，用系统保存面板写盘；浏览器里仍走
+   普通下载链接。 */
+async function download(fmt) {
+  if (!current) return;
+  const base = current.sessionId
+    ? `/api/sessions/${current.sessionId}/file`
+    : `/api/jobs/${current.jobId}/file`;
+  const url = `${base}?fmt=${fmt}`;
+  const native = window.pywebview && window.pywebview.api && window.pywebview.api.save_file;
+
+  if (!native) { location.assign(url); return; }
+  try {
+    const text = await (await fetch(url)).text();
+    const stem = current.name.replace(/\.[^.]+$/, "");
+    const saved = await window.pywebview.api.save_file(`${stem}.${fmt}`, text);
+    toast(saved ? "已保存到 " + saved : "已取消保存");
+  } catch (err) {
+    toast("保存失败：" + err);
+  }
+}
+
+/* ---------- 历史记录 ---------- */
+let sessions = [];
+
+function markActive() {
+  document.querySelectorAll(".srow").forEach(el =>
+    el.classList.toggle("active-row", current && el.dataset.id === current.sessionId));
+}
+
+async function loadSessions() {
+  try {
+    const data = await (await fetch("/api/sessions")).json();
+    sessions = data.sessions || [];
+  } catch { return; }
+
+  $("history").classList.toggle("hidden", sessions.length === 0);
+  $("hcount").textContent = sessions.length ? `${sessions.length} 条` : "";
+  $("hlist").innerHTML = sessions.map(m => {
+    const when = (m.created || "").replace("T", " ").slice(0, 16);
+    const who = (m.speakers || []).join("、");
+    return `<div class="srow" data-id="${m.id}">
+      <span class="sname">${esc(m.name)}</span>
+      <span class="smeta">${who ? esc(who) + " · " : ""}${hms(m.duration_seconds || 0)} · ${when}</span>
+      <button class="sdel" data-del="${m.id}" title="删除这条记录">×</button>
+    </div>`;
+  }).join("");
+
+  $("hlist").querySelectorAll(".srow").forEach(row => {
+    row.addEventListener("click", (e) => {
+      if (e.target.dataset.del) return;
+      openSession(row.dataset.id);
+    });
   });
+  $("hlist").querySelectorAll(".sdel").forEach(btn => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); removeSession(btn.dataset.del); });
+  });
+  markActive();
 }
+
+async function openSession(id) {
+  try {
+    const rec = await (await fetch(`/api/sessions/${id}`)).json();
+    if (rec.error) { toast(rec.error); return; }
+    render(fromPayload(rec));
+    $("out").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) { toast("打开失败：" + err); }
+}
+
+async function removeSession(id) {
+  try { await fetch(`/api/sessions/${id}`, { method: "DELETE" }); } catch { /* 忽略 */ }
+  if (current && current.sessionId === id) { $("out").classList.add("hidden"); current = null; }
+  loadSessions();
+}
+
+loadSessions();
 
 function toast(msg) {
   const t = $("toast");

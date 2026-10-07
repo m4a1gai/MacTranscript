@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-s", "--speakers", metavar="NAMES",
-        help="按首次发言顺序排列的名字，以逗号分隔，例如 '张三,李四'",
+        help="按首次发言顺序排列的名字，逗号分隔（中英文逗号、顿号都可），例如 '张三，李四'",
     )
     parser.add_argument(
         "-n", "--num-speakers", default="2", metavar="N",
@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     quiet = args.quiet
     num_speakers = parse_num_speakers(args.num_speakers)
-    names = [n.strip() for n in args.speakers.split(",") if n.strip()] if args.speakers else None
+    names = pipeline.parse_speaker_names(args.speakers)
     to_stdout = str(args.output) == "-"
 
     # 把流程的进度回调翻译成终端上的分步输出。

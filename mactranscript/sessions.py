@@ -1,0 +1,108 @@
+"""转录记录的持久化。
+
+每次转录完成就落盘。界面关掉、应用退出、甚至中途崩溃，之前的成果都还在，
+不必重跑一遍几分钟的转写。
+
+存在「应用程序支持」目录而不是临时目录：临时目录会被系统清理，也会被
+web.sweep_orphaned() 当成上传残留删掉。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+APP_NAME = "MacTranscript"
+
+
+def root() -> Path:
+    """记录存放目录。可用环境变量覆盖，便于测试。"""
+    override = os.environ.get("MACTRANSCRIPT_HOME")
+    base = Path(override) if override else (
+        Path.home() / "Library" / "Application Support" / APP_NAME
+    )
+    path = base / "sessions"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _slug(name: str) -> str:
+    """把文件名压成安全的目录名片段，中文照样保留。"""
+    stem = Path(name).stem[:40]
+    cleaned = re.sub(r"[^\w一-鿿-]+", "-", stem, flags=re.UNICODE)
+    return cleaned.strip("-") or "recording"
+
+
+def save(name: str, markdown: str, payload: dict, meta: dict) -> dict:
+    """写入一条记录，返回它的元信息。"""
+    created = datetime.now()
+    session_id = f"{created:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+    folder = root() / session_id
+    folder.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "id": session_id,
+        "name": name,
+        "created": created.isoformat(timespec="seconds"),
+        **meta,
+    }
+    (folder / "transcript.md").write_text(markdown, encoding="utf-8")
+    (folder / "data.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    (folder / "meta.json").write_text(
+        json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    return record
+
+
+def _read_meta(folder: Path) -> dict | None:
+    try:
+        meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    meta["id"] = folder.name  # 以目录名为准，防止手工改动过 meta
+    return meta
+
+
+def listing() -> list[dict]:
+    """全部记录，最新的在前。"""
+    items = [m for folder in root().iterdir() if folder.is_dir()
+             for m in [_read_meta(folder)] if m]
+    items.sort(key=lambda m: m.get("created", ""), reverse=True)
+    return items
+
+
+def _folder(session_id: str) -> Path | None:
+    """定位记录目录，并挡住路径穿越。"""
+    if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}", session_id or ""):
+        return None
+    folder = root() / session_id
+    return folder if folder.is_dir() else None
+
+
+def load(session_id: str) -> dict | None:
+    """读出一条完整记录：元信息 + Markdown + 结构化数据。"""
+    folder = _folder(session_id)
+    if folder is None:
+        return None
+    meta = _read_meta(folder)
+    if meta is None:
+        return None
+    try:
+        meta["markdown"] = (folder / "transcript.md").read_text(encoding="utf-8")
+        meta["payload"] = json.loads((folder / "data.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta
+
+
+def delete(session_id: str) -> bool:
+    folder = _folder(session_id)
+    if folder is None:
+        return False
+    shutil.rmtree(folder, ignore_errors=True)
+    return True

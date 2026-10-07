@@ -14,6 +14,7 @@ import atexit
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -25,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, asr, diarize, pipeline
+from . import __version__, asr, diarize, pipeline, sessions
 from .audio import AudioError, find_tool, probe_duration
 
 STATIC = Path(__file__).parent / "static"
@@ -87,8 +88,38 @@ def _run_job(job_id: str, path: Path, options: dict) -> None:
         )
         return
 
+    payload = {
+        "source": path.name,
+        "duration_seconds": result.audio_seconds,
+        "language": result.language,
+        "speaker_names": result.speaker_names,
+        "turns": [vars(t) for t in result.turns],
+        "blocks": [vars(b) for b in result.blocks],
+    }
+    speakers = list(dict.fromkeys(result.speaker_names.values()))
+
+    # 先落盘再更新状态：界面拿到「完成」时，记录一定已经存在了。
+    session_id = None
+    try:
+        session_id = sessions.save(
+            path.name, result.markdown, payload,
+            {
+                "duration_seconds": result.audio_seconds,
+                "elapsed": result.elapsed,
+                "language": result.language,
+                "speakers": speakers,
+                "block_count": len(result.blocks),
+                "word_count": result.word_count,
+                "dropped_words": result.dropped_words,
+                "asr_model": options["model"],
+            },
+        )["id"]
+    except OSError as exc:  # 存不下也不该丢掉这次结果
+        print(f"警告：转录记录保存失败：{exc}", file=sys.stderr)
+
     _job_update(
         job_id,
+        session_id=session_id,
         state="done",
         percent=1.0,
         stage="done",
@@ -99,7 +130,7 @@ def _run_job(job_id: str, path: Path, options: dict) -> None:
         language=result.language,
         dropped_words=result.dropped_words,
         word_count=result.word_count,
-        speakers=list(dict.fromkeys(result.speaker_names.values())),
+        speakers=speakers,
         # 界面直接拿这个渲染，说话人已经换成展示名称。
         display_blocks=[
             {
@@ -110,14 +141,7 @@ def _run_job(job_id: str, path: Path, options: dict) -> None:
             }
             for b in result.blocks
         ],
-        payload={
-            "source": path.name,
-            "duration_seconds": result.audio_seconds,
-            "language": result.language,
-            "speaker_names": result.speaker_names,
-            "turns": [vars(t) for t in result.turns],
-            "blocks": [vars(b) for b in result.blocks],
-        },
+        payload=payload,
     )
 
 
@@ -198,6 +222,10 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_static("index.html", "text/html; charset=utf-8")
         elif path == "/api/env":
             self._json(HTTPStatus.OK, _environment())
+        elif path == "/api/sessions":
+            self._json(HTTPStatus.OK, {"sessions": sessions.listing()})
+        elif path.startswith("/api/sessions/"):
+            self._session_route(path)
         elif path.startswith("/api/jobs/"):
             self._job_route(path)
         else:
@@ -205,6 +233,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         self.do_GET()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        route = urlparse(self.path)
+        if not route.path.startswith("/api/sessions/"):
+            self._error(HTTPStatus.NOT_FOUND, "没有这个地址")
+            return
+        session_id = route.path[len("/api/sessions/"):].split("/")[0]
+        if sessions.delete(session_id):
+            self._json(HTTPStatus.OK, {"deleted": session_id})
+        else:
+            self._error(HTTPStatus.NOT_FOUND, "转录记录不存在")
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path)
@@ -229,6 +268,32 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(HTTPStatus.OK, target.read_bytes(), content_type)
 
+    def _send_download(self, name: str, markdown: str, payload: dict, fmt: str) -> None:
+        """把成品作为附件送出，中文文件名用 RFC 5987 编码避免乱码。"""
+        stem = Path(name).stem
+        if fmt == "json":
+            body = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+            filename, ctype = f"{stem}.json", "application/json; charset=utf-8"
+        else:
+            body = markdown.encode("utf-8")
+            filename, ctype = f"{stem}.md", "text/markdown; charset=utf-8"
+        quoted = "".join(f"%{byte:02x}" for byte in filename.encode("utf-8"))
+        self._send(HTTPStatus.OK, body, ctype,
+                   {"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"})
+
+    def _session_route(self, path: str) -> None:
+        parts = path[len("/api/sessions/"):].split("/")
+        record = sessions.load(parts[0])
+        if record is None:
+            self._error(HTTPStatus.NOT_FOUND, "转录记录不存在")
+            return
+        if len(parts) > 1 and parts[1] == "file":
+            fmt = parse_qs(urlparse(self.path).query).get("fmt", ["md"])[0]
+            self._send_download(record["name"], record["markdown"],
+                                record["payload"], fmt)
+            return
+        self._json(HTTPStatus.OK, record)
+
     def _job_route(self, path: str) -> None:
         parts = path[len("/api/jobs/"):].split("/")
         job = _job_snapshot(parts[0])
@@ -242,19 +307,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(HTTPStatus.CONFLICT, "任务尚未完成")
                 return
             fmt = parse_qs(urlparse(self.path).query).get("fmt", ["md"])[0]
-            stem = Path(job["name"]).stem
-            if fmt == "json":
-                body = json.dumps(job["payload"], indent=2,
-                                  ensure_ascii=False).encode("utf-8")
-                filename, ctype = f"{stem}.json", "application/json; charset=utf-8"
-            else:
-                body = job["markdown"].encode("utf-8")
-                filename, ctype = f"{stem}.md", "text/markdown; charset=utf-8"
-            # filename* 用 RFC 5987 编码，中文文件名才不会乱码。
-            quoted = filename.encode("utf-8").hex()
-            quoted = "".join(f"%{quoted[i:i+2]}" for i in range(0, len(quoted), 2))
-            self._send(HTTPStatus.OK, body, ctype,
-                       {"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"})
+            self._send_download(job["name"], job["markdown"], job["payload"], fmt)
             return
 
         # 状态查询：markdown 正文只在完成后带上，轮询时不必反复传。
@@ -306,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
         language = one("language", "en")
         options = {
             "num_speakers": None if raw_count in ("auto", "0", "") else int(raw_count),
-            "speaker_names": [n.strip() for n in raw_speakers.split(",") if n.strip()] or None,
+            "speaker_names": pipeline.parse_speaker_names(raw_speakers),
             "language": None if language == "auto" else language,
             "model": one("model") or asr.DEFAULT_MODEL,
             "device": one("device", "auto") or "auto",
@@ -344,6 +397,12 @@ def find_port(start: int = 8765, tries: int = 12) -> int | None:
             except OSError:
                 continue
     return None
+
+
+def has_running_jobs() -> bool:
+    """是否还有转录在进行 —— 关窗前要据此提醒。"""
+    with _jobs_lock:
+        return any(job["state"] == "running" for job in _jobs.values())
 
 
 def cleanup() -> None:
