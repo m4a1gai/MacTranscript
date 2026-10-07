@@ -54,10 +54,18 @@ def test_读回完整内容():
 
 
 def test_列表按时间倒序():
+    # 连续保存不加延时：时间戳必须精确到足以区分，否则顺序会不确定。
     first = _save("早.m4a")
     second = _save("晚.m4a")
     ids = [m["id"] for m in sessions.listing()]
     assert ids.index(second["id"]) < ids.index(first["id"])
+
+
+def test_同一秒内保存也能分出先后():
+    saved = [_save(f"第{i}条.m4a") for i in range(5)]
+    ids = [m["id"] for m in sessions.listing()]
+    positions = [ids.index(r["id"]) for r in saved]
+    assert positions == sorted(positions, reverse=True), "后保存的应排在前面"
 
 
 def test_删除后就查不到了():

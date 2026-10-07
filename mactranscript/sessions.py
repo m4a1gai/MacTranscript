@@ -48,7 +48,9 @@ def save(name: str, markdown: str, payload: dict, meta: dict) -> dict:
     record = {
         "id": session_id,
         "name": name,
-        "created": created.isoformat(timespec="seconds"),
+        # 精确到微秒。只存到秒的话，同一秒内保存的两条记录时间戳完全相同，
+        # 列表排序就会变成不确定的；毫秒也不够 —— 一次保存不到 1 毫秒。
+        "created": created.isoformat(timespec="microseconds"),
         **meta,
     }
     (folder / "transcript.md").write_text(markdown, encoding="utf-8")
@@ -72,7 +74,8 @@ def listing() -> list[dict]:
     """全部记录，最新的在前。"""
     items = [m for folder in root().iterdir() if folder.is_dir()
              for m in [_read_meta(folder)] if m]
-    items.sort(key=lambda m: m.get("created", ""), reverse=True)
+    # 以 id 作二级键，时间戳万一仍然相同（比如旧记录只有秒精度）也能稳定排序。
+    items.sort(key=lambda m: (m.get("created", ""), m.get("id", "")), reverse=True)
     return items
 
 
