@@ -14,6 +14,7 @@ import atexit
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -267,6 +268,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(HTTPStatus.NOT_FOUND, "转录记录不存在")
             else:
                 self._json(HTTPStatus.OK, record)
+            return
+        if route.path == "/api/reveal":
+            # 让用户随时能找到、备份自己的转录记录。
+            subprocess.run(["open", str(sessions.root())], check=False)
+            self._json(HTTPStatus.OK, {"path": str(sessions.root())})
             return
         if route.path == "/api/quit":
             self._json(HTTPStatus.OK, {"stopping": True})

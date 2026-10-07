@@ -146,6 +146,8 @@
   .hhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
   .hhead h2 { font-size: 15px; font-weight: 600; margin: 0; }
   .hhead span { color: var(--muted); font-size: 12.5px; }
+  .reveal { margin-left: auto; background: none; color: var(--accent);
+            border: 1px solid var(--line); padding: 4px 10px; font-size: 12.5px; }
   .srow { display: flex; align-items: center; gap: 12px; padding: 11px 2px;
           border-top: 1px solid var(--line); cursor: pointer; }
   .srow:hover { background: var(--accent-soft); margin: 0 -10px; padding-left: 12px;
@@ -264,7 +266,10 @@
   </section>
 
   <section class="panel hidden" id="history">
-    <div class="hhead"><h2>历史记录</h2><span id="hcount"></span></div>
+    <div class="hhead">
+      <h2>历史记录</h2><span id="hcount"></span>
+      <button id="reveal" class="reveal">在访达中显示</button>
+    </div>
     <div id="hlist"></div>
   </section>
 
@@ -652,12 +657,25 @@ async function openSession(id) {
 }
 
 async function removeSession(id) {
+  // 转录记录是跑了几分钟才得到的东西，别让一次误点就没了。
+  const row = sessions.find(m => m.id === id);
+  if (!confirm(`删除「${row ? row.name : id}」的转录记录？\n此操作无法撤销。`)) return;
   try { await fetch(`/api/sessions/${id}`, { method: "DELETE" }); } catch { /* 忽略 */ }
   if (current && current.sessionId === id) { $("out").classList.add("hidden"); current = null; }
   loadSessions();
 }
 
 loadSessions();
+
+$("reveal").addEventListener("click", async () => {
+  try {
+    const r = await (await fetch("/api/reveal", { method: "POST" })).json();
+    toast("记录存放在 " + r.path);
+  } catch { toast("打开失败"); }
+});
+
+// 记录可能在别处被改动（手工删掉、另一个窗口操作），窗口回到前台时刷新一次。
+window.addEventListener("focus", () => loadSessions());
 
 function toast(msg) {
   const t = $("toast");
